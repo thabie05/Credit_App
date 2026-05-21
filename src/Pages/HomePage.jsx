@@ -308,7 +308,7 @@ export default function HomePage() {
                     <div>
                       <div className="flex items-center gap-2">
                         <span className={`w-2.5 h-2.5 rounded-full ${group.isFullyPaid ? 'bg-emerald-400 shadow-emerald-400' : 'bg-red-400 shadow-red-400'}`}></span>
-                        <button onClick={() => openProfileModal(group.displayName)} className="font-bold text-lg text-left hover:text-amber-400 transition-colors duration-200 underline decoration-dotted underline-offset-2" title="View/Edit Profile">{group.displayName}</button>
+                        <button onClick={() => openProfileModal(group.displayName)} className="font-bold text-lg text-left hover:text-amber-400 transition-colors duration-200 " title="View/Edit Profile">{group.displayName}</button>
                       </div>
                       <div className="text-xs text-slate-500 mt-1">{group.individualDebts.length} debt{group.individualDebts.length > 1 ? 's' : ''} · Interest: {formatCurrency(group.totalInterest)}</div>
                     </div>
