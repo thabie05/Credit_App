@@ -111,26 +111,18 @@ export function DebtProvider({ children }) {
     const handleOffline = () => setIsOnline(false);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
+    return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); };
   }, []);
 
   useEffect(() => {
     if (!user) return;
     const docRef = doc(db, SETTINGS_COLLECTION, user.uid);
-    const unsub = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) setGlobalInterestRate(docSnap.data().value || 50);
-    });
+    const unsub = onSnapshot(docRef, (docSnap) => { if (docSnap.exists()) setGlobalInterestRate(docSnap.data().value || 50); });
     return () => unsub();
   }, [user]);
 
   useEffect(() => {
-    if (loaded && user) {
-      const docRef = doc(db, SETTINGS_COLLECTION, user.uid);
-      setDoc(docRef, { value: globalInterestRate }, { merge: true });
-    }
+    if (loaded && user) { const docRef = doc(db, SETTINGS_COLLECTION, user.uid); setDoc(docRef, { value: globalInterestRate }, { merge: true }); }
   }, [globalInterestRate, loaded, user]);
 
   useEffect(() => {
@@ -169,19 +161,12 @@ export function DebtProvider({ children }) {
   useEffect(() => {
     if (!user) { setProfiles([]); return; }
     const q = query(collection(db, PROFILES_COLLECTION), where('userId', '==', user.uid));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const profileList = [];
-      snapshot.forEach((doc) => profileList.push({ id: doc.id, ...doc.data() }));
-      setProfiles(profileList);
-    });
+    const unsubscribe = onSnapshot(q, (snapshot) => { const profileList = []; snapshot.forEach((doc) => profileList.push({ id: doc.id, ...doc.data() })); setProfiles(profileList); });
     return () => unsubscribe();
   }, [user]);
 
   // ── Add a new debt ──────────────────────────
-  const addDebt = useCallback(async ({
-    name, borrowedAmount, note, interestRate, date,
-    isCompound = false, dueDate = null, penaltyRate = 50, profileId = null
-  }) => {
+  const addDebt = useCallback(async ({ name, borrowedAmount, note, interestRate, date, isCompound = false, dueDate = null, penaltyRate = 50, profileId = null }) => {
     if (!user) return;
     const rate = interestRate !== undefined ? interestRate : globalInterestRate;
     const debtDate = date || getTodayDate();
@@ -210,9 +195,7 @@ export function DebtProvider({ children }) {
     const date = repaymentDate || getTodayDate();
     const newRepayment = { amount: Math.round(repaymentAmount * 100) / 100, date };
     const updatedRepayments = [...(debt.repayments || []), newRepayment];
-    const totalRepaid = updatedRepayments.reduce((sum, r) => sum + r.amount, 0);
-    const totalOwed = calculateTotalOwed(debt);
-    const newReturnOwed = Math.max(0, Math.round((totalOwed - totalRepaid) * 100) / 100);
+    const newReturnOwed = Math.max(0, Math.round((debt.returnAmountOwed - repaymentAmount) * 100) / 100);
     const isPaid = newReturnOwed <= 0;
     const debtRef = doc(db, DEBTS_COLLECTION, debtorId);
     await updateDoc(debtRef, { repayments: updatedRepayments, returnAmountOwed: newReturnOwed, paid: isPaid, paidDate: isPaid ? date : null });
@@ -225,47 +208,40 @@ export function DebtProvider({ children }) {
     const groupRepaymentId = 'grp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
     let remainingToApply = Math.round(totalAmount * 100) / 100;
     const targetDebts = debts.filter(d => debtIds.includes(d.firestoreId) && !d.paid);
-
     for (const debt of targetDebts) {
       if (remainingToApply <= 0) break;
       const applyToThisDebt = Math.min(remainingToApply, debt.returnAmountOwed);
-      
-      const newRepayment = {
-        amount: Math.round(applyToThisDebt * 100) / 100,
-        date,
-        groupId: groupRepaymentId,
-        groupTotal: Math.round(totalAmount * 100) / 100,
-      };
-
+      const newRepayment = { amount: Math.round(applyToThisDebt * 100) / 100, date, groupId: groupRepaymentId, groupTotal: Math.round(totalAmount * 100) / 100 };
       const updatedRepayments = [...(debt.repayments || []), newRepayment];
-      const totalRepaid = updatedRepayments.reduce((sum, r) => sum + r.amount, 0);
-      const totalOwed = calculateTotalOwed(debt);
-      const newOwed = Math.max(0, Math.round((totalOwed - totalRepaid) * 100) / 100);
+      const newOwed = Math.max(0, Math.round((debt.returnAmountOwed - applyToThisDebt) * 100) / 100);
       const isPaid = newOwed <= 0;
-
       const debtRef = doc(db, DEBTS_COLLECTION, debt.firestoreId);
       await updateDoc(debtRef, { repayments: updatedRepayments, returnAmountOwed: newOwed, paid: isPaid, paidDate: isPaid ? date : null });
-
       remainingToApply = Math.round((remainingToApply - applyToThisDebt) * 100) / 100;
     }
   }, [debts, user]);
 
+  // ── Update debtor name across all debts ─────
+  const updateDebtorName = useCallback(async (oldName, newName) => {
+    if (!user || !oldName || !newName || oldName.toLowerCase() === newName.toLowerCase()) return;
+    const debtorDebts = debts.filter(d => d.name.toLowerCase().trim() === oldName.toLowerCase().trim());
+    if (debtorDebts.length === 0) return;
+    const batch = writeBatch(db);
+    debtorDebts.forEach(debt => { batch.update(doc(db, DEBTS_COLLECTION, debt.firestoreId), { name: newName }); });
+    const profile = profiles.find(p => p.name.toLowerCase() === oldName.toLowerCase());
+    if (profile) { batch.update(doc(db, PROFILES_COLLECTION, profile.id), { name: newName }); }
+    await batch.commit();
+  }, [debts, profiles, user]);
+
+  // ── Profile management ──────────────────────
   const addProfile = useCallback(async ({ name, phone, email, address, notes }) => {
     if (!user) return;
     await addDoc(collection(db, PROFILES_COLLECTION), { userId: user.uid, name, phone: phone || '', email: email || '', address: address || '', notes: notes || '', createdAt: new Date().toISOString() });
   }, [user]);
 
-  const updateProfile = useCallback(async (profileId, data) => {
-    await updateDoc(doc(db, PROFILES_COLLECTION, profileId), data);
-  }, []);
-
-  const deleteProfile = useCallback(async (profileId) => {
-    await deleteDoc(doc(db, PROFILES_COLLECTION, profileId));
-  }, []);
-
-  const deleteDebt = useCallback(async (firestoreId) => {
-    await deleteDoc(doc(db, DEBTS_COLLECTION, firestoreId));
-  }, []);
+  const updateProfile = useCallback(async (profileId, data) => { await updateDoc(doc(db, PROFILES_COLLECTION, profileId), data); }, []);
+  const deleteProfile = useCallback(async (profileId) => { await deleteDoc(doc(db, PROFILES_COLLECTION, profileId)); }, []);
+  const deleteDebt = useCallback(async (firestoreId) => { await deleteDoc(doc(db, DEBTS_COLLECTION, firestoreId)); }, []);
 
   const clearAllPaid = useCallback(async () => {
     const paidDebts = debts.filter(d => d.paid);
@@ -279,7 +255,7 @@ export function DebtProvider({ children }) {
     debts, profiles, loaded, isOnline,
     interestRate: globalInterestRate, setInterestRate: setGlobalInterestRate,
     addDebt, addRepayment, addGroupRepayment, deleteDebt, clearAllPaid,
-    addProfile, updateProfile, deleteProfile,
+    addProfile, updateProfile, deleteProfile, updateDebtorName,
   };
 
   return <DebtContext.Provider value={value}>{children}</DebtContext.Provider>;
