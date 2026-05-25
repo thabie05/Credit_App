@@ -13,7 +13,16 @@ const PROFILES_COLLECTION = 'debtorProfiles';
 // ── Utility Functions ─────────────────────────
 export function formatCurrency(num) {
   if (num === undefined || num === null) return 'R0.00';
-  return 'R' + Number(num).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  
+  const settings = JSON.parse(localStorage.getItem('appSettings') || '{}');
+  const symbol = settings.currencySymbol || 'R';
+  const thouSep = settings.thousandSeparator || ' ';
+  const decSep = settings.decimalSeparator || '.';
+  
+  const parts = Number(num).toFixed(2).split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, thouSep);
+  
+  return symbol + parts.join(decSep);
 }
 
 export function getTodayDate() {
@@ -22,8 +31,36 @@ export function getTodayDate() {
 
 export function formatDate(isoStr) {
   if (!isoStr) return '';
+  
+  // Get saved date format from localStorage
+  const settings = JSON.parse(localStorage.getItem('appSettings') || '{}');
+  const dateFormat = settings.dateFormat || 'MMM DD, YYYY';
+  
   const d = new Date(isoStr + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  const day = d.getDate();
+  const month = d.getMonth();
+  const year = d.getFullYear();
+  
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const monthFullNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  
+  const pad = (n) => String(n).padStart(2, '0');
+  
+  switch (dateFormat) {
+    case 'DD/MM/YYYY':
+      return `${pad(day)}/${pad(month + 1)}/${year}`;
+    case 'MM/DD/YYYY':
+      return `${pad(month + 1)}/${pad(day)}/${year}`;
+    case 'YYYY-MM-DD':
+      return `${year}-${pad(month + 1)}-${pad(day)}`;
+    case 'DD Month YYYY':
+      return `${day} ${monthFullNames[month]} ${year}`;
+    case 'DD MMM YYYY':
+      return `${pad(day)} ${monthNames[month]} ${year}`;
+    case 'MMM DD, YYYY':
+    default:
+      return `${monthNames[month]} ${pad(day)}, ${year}`;
+  }
 }
 
 export function monthsBetween(date1, date2) {

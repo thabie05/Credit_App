@@ -7,6 +7,9 @@ import {
   createUserWithEmailAndPassword,
   updateProfile,
   sendPasswordResetEmail,
+  updatePassword,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
   signOut,
   onAuthStateChanged,
 } from 'firebase/auth';
@@ -26,88 +29,39 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoading(false);
-    });
+    const unsubscribe = onAuthStateChanged(auth, (user) => { setUser(user); setLoading(false); });
     return unsubscribe;
   }, []);
 
-  const signInWithGoogle = async () => {
-    try {
-      await signInWithPopup(auth, googleProvider);
-    } catch (error) {
-      console.error('Google sign-in error:', error);
-      throw error;
-    }
-  };
-
-  const signInWithEmail = async (email, password) => {
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-    } catch (error) {
-      console.error('Email sign-in error:', error);
-      throw error;
-    }
-  };
-
+  const signInWithGoogle = async () => { await signInWithPopup(auth, googleProvider); };
+  const signInWithEmail = async (email, password) => { await signInWithEmailAndPassword(auth, email, password); };
+  
   const signUpWithEmail = async (email, password, name) => {
-    try {
-      const result = await createUserWithEmailAndPassword(auth, email, password);
-      if (name) {
-        await updateProfile(result.user, { displayName: name });
-        setUser({ ...result.user, displayName: name });
-      }
-    } catch (error) {
-      console.error('Sign-up error:', error);
-      throw error;
-    }
+    const result = await createUserWithEmailAndPassword(auth, email, password);
+    if (name) { await updateProfile(result.user, { displayName: name }); setUser({ ...result.user, displayName: name }); }
   };
 
-  const resetPassword = async (email) => {
-    try {
-      await sendPasswordResetEmail(auth, email);
-    } catch (error) {
-      console.error('Password reset error:', error);
-      throw error;
-    }
-  };
+  const resetPassword = async (email) => { await sendPasswordResetEmail(auth, email); };
 
   const updateUserProfile = async (displayName) => {
-    try {
-      if (auth.currentUser) {
-        await updateProfile(auth.currentUser, { displayName });
-        setUser({ ...auth.currentUser, displayName });
-      }
-    } catch (error) {
-      console.error('Update profile error:', error);
-      throw error;
-    }
+    if (auth.currentUser) { await updateProfile(auth.currentUser, { displayName }); setUser({ ...auth.currentUser, displayName }); }
   };
 
-  const logout = async () => {
-    try {
-      await signOut(auth);
-    } catch (error) {
-      console.error('Logout error:', error);
-      throw error;
-    }
+  const changePassword = async (currentPassword, newPassword) => {
+    const user = auth.currentUser;
+    if (!user || !user.email) throw new Error('No authenticated user');
+    const credential = EmailAuthProvider.credential(user.email, currentPassword);
+    await reauthenticateWithCredential(user, credential);
+    await updatePassword(user, newPassword);
   };
+
+  const logout = async () => { await signOut(auth); };
 
   const value = {
-    user,
-    loading,
-    signInWithGoogle,
-    signInWithEmail,
-    signUpWithEmail,
-    resetPassword,
-    updateUserProfile,
-    logout,
+    user, loading,
+    signInWithGoogle, signInWithEmail, signUpWithEmail,
+    resetPassword, updateUserProfile, changePassword, logout,
   };
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

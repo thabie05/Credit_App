@@ -238,90 +238,114 @@ export default function ImportPage() {
 
   // Match debts (Money Out) - check against existing debtors
   const matchDebts = (debtsOut) => {
-    const existingDebtors = new Map();
-    debts.forEach(d => {
-      const key = d.name.toLowerCase().trim();
-      if (!existingDebtors.has(key)) {
-        existingDebtors.set(key, { name: d.name, firestoreIds: [] });
-      }
-      existingDebtors.get(key).firestoreIds.push(d.firestoreId);
-    });
+  const existingDebtors = new Map();
+  debts.forEach(d => {
+    const key = d.name.toLowerCase().trim();
+    if (!existingDebtors.has(key)) {
+      existingDebtors.set(key, { name: d.name, firestoreIds: [] });
+    }
+    existingDebtors.get(key).firestoreIds.push(d.firestoreId);
+  });
 
-    console.log('=== EXISTING DEBTORS ===', Array.from(existingDebtors.keys()));
+  console.log('=== EXISTING DEBTORS ===', Array.from(existingDebtors.keys()));
 
-    const matchedToExisting = new Map();
-    const unmatched = [];
+  const matchedToExisting = new Map();
+  const unmatched = [];
 
-    debtsOut.forEach(d => {
-      const extractedName = d.extractedName.toLowerCase().trim();
-      let matchedName = null;
+  debtsOut.forEach(d => {
+    const extractedName = d.extractedName.toLowerCase().trim();
+    let bestMatch = null;
+    let bestScore = 0;
 
-      if (existingDebtors.has(extractedName)) {
-        matchedName = existingDebtors.get(extractedName).name;
-      } else {
-        existingDebtors.forEach((debtor, key) => {
-          const debtorParts = debtor.name.toLowerCase().split(' ');
-          const extractedParts = extractedName.split(' ');
-          debtorParts.forEach(dp => {
-            if (dp.length > 1) {
-              extractedParts.forEach(ep => {
-                if (ep.includes(dp) || dp.includes(ep)) {
-                  matchedName = debtor.name;
-                }
-              });
-            }
-          });
+    // Try exact match first
+    if (existingDebtors.has(extractedName)) {
+      bestMatch = existingDebtors.get(extractedName);
+      bestScore = 100;
+    } else {
+      // Try partial match
+      existingDebtors.forEach((debtor, key) => {
+        let score = 0;
+        const debtorParts = debtor.name.toLowerCase().split(' ');
+        const extractedParts = extractedName.split(' ');
+        
+        debtorParts.forEach(dp => {
+          if (dp.length > 1) {
+            extractedParts.forEach(ep => {
+              if (ep === dp) score += 50;
+              else if (ep.includes(dp) || dp.includes(ep)) score += 30;
+            });
+          }
+        });
+        
+        // Last name match bonus
+        if (debtorParts.length > 0 && extractedParts.length > 0) {
+          const debtorLastName = debtorParts[debtorParts.length - 1];
+          const extractedLastName = extractedParts[extractedParts.length - 1];
+          if (debtorLastName === extractedLastName) score += 40;
+        }
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestMatch = debtor;
+        }
+      });
+    }
+
+    if (bestMatch && bestScore >= 50) {
+      const key = bestMatch.name.toLowerCase();
+      if (!matchedToExisting.has(key)) {
+        matchedToExisting.set(key, {
+          name: bestMatch.name,
+          totalAmount: 0,
+          transactions: [],
+          isExisting: true,
+          matchScore: bestScore,
         });
       }
+      const group = matchedToExisting.get(key);
+      group.totalAmount += d.amount;
+      group.transactions.push({ ...d, matchScore: bestScore });
+      console.log(`✅ Matched "${d.extractedName}" -> "${bestMatch.name}" (${bestScore}%)`);
+    } else {
+      unmatched.push(d);
+    }
+  });
 
-      if (matchedName) {
-        if (!matchedToExisting.has(matchedName.toLowerCase())) {
-          matchedToExisting.set(matchedName.toLowerCase(), {
-            name: matchedName,
-            totalAmount: 0,
-            transactions: [],
-            isExisting: true,
-            firestoreIds: existingDebtors.get(matchedName.toLowerCase())?.firestoreIds || [],
-          });
-        }
-        const group = matchedToExisting.get(matchedName.toLowerCase());
-        group.totalAmount += d.amount;
-        group.transactions.push(d);
-        console.log(`✅ Matched "${d.extractedName}" -> "${matchedName}" (existing debtor)`);
-      } else {
-        unmatched.push(d);
-      }
-    });
+  // Group unmatched by name
+  const newDebtors = new Map();
+  unmatched.forEach(d => {
+    const key = d.extractedName.toLowerCase().trim();
+    if (!newDebtors.has(key)) {
+      newDebtors.set(key, { name: d.extractedName, totalAmount: 0, transactions: [], isExisting: false, matchScore: 0 });
+    }
+    const g = newDebtors.get(key);
+    g.totalAmount += d.amount;
+    g.transactions.push({ ...d, matchScore: 0 });
+    console.log(`🆕 New debtor: "${d.extractedName}"`);
+  });
 
-    const newDebtors = new Map();
-    unmatched.forEach(d => {
-      const key = d.extractedName.toLowerCase().trim();
-      if (!newDebtors.has(key)) {
-        newDebtors.set(key, { name: d.extractedName, totalAmount: 0, transactions: [], isExisting: false });
-      }
-      const g = newDebtors.get(key);
-      g.totalAmount += d.amount;
-      g.transactions.push(d);
-      console.log(`🆕 New debtor: "${d.extractedName}"`);
-    });
+  const allMatched = [
+    ...Array.from(matchedToExisting.values()),
+    ...Array.from(newDebtors.values()),
+  ].map(g => ({
+    name: g.name,
+    totalAmount: Math.round(g.totalAmount * 100) / 100,
+    transactionCount: g.transactions.length,
+    transactions: g.transactions.map(t => ({
+      id: t.id,
+      date: t.date,
+      description: t.description,
+      amount: t.amount,
+      matchScore: g.isExisting ? Math.min(100, g.matchScore) : 0,
+    })),
+    earliestDate: g.transactions.reduce((earliest, t) => t.date < earliest ? t.date : earliest, g.transactions[0]?.date || ''),
+    isExisting: g.isExisting || false,
+    matchScore: g.isExisting ? Math.min(100, g.matchScore) : 0,
+  }));
 
-    const allMatched = [
-      ...Array.from(matchedToExisting.values()),
-      ...Array.from(newDebtors.values()),
-    ].map(g => ({
-      name: g.name,
-      totalAmount: Math.round(g.totalAmount * 100) / 100,
-      transactionCount: g.transactions.length,
-      transactions: g.transactions,
-      earliestDate: g.transactions.reduce((earliest, t) => 
-        t.date < earliest ? t.date : earliest, g.transactions[0]?.date || ''
-      ),
-      isExisting: g.isExisting || false,
-    }));
-
-    console.log('=== MATCHED DEBTS ===', allMatched);
-    setMatchedDebts(allMatched);
-  };
+  console.log('=== MATCHED DEBTS ===', allMatched);
+  setMatchedDebts(allMatched);
+};
 
   const togglePaymentRow = (id) => {
     const newSet = new Set(selectedPaymentRows);
@@ -539,54 +563,69 @@ export default function ImportPage() {
 
           {/* Debts Tab */}
           {activeTab === 'debts' && (
-            <div className="bg-gray-900/70 backdrop-blur-lg border border-white/5 rounded-2xl p-6 shadow-xl">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-red-400">💸 Debts Given (Money Out)</h2>
-                {matchedDebts.length > 0 && (
-                  <button onClick={selectAllDebts} className="text-xs px-3 py-1.5 rounded-lg border border-white/10 hover:bg-white/5 text-slate-400 transition-all">
-                    Select All
-                  </button>
-                )}
-              </div>
+  <div className="bg-gray-900/70 backdrop-blur-lg border border-white/5 rounded-2xl p-6 shadow-xl">
+    <div className="flex justify-between items-center mb-4">
+      <h2 className="text-lg font-bold text-red-400">💸 Debts Given (Money Out)</h2>
+      {matchedDebts.length > 0 && (
+        <button onClick={selectAllDebts} className="text-xs px-3 py-1.5 rounded-lg border border-white/10 hover:bg-white/5 text-slate-400 transition-all">
+          Select All
+        </button>
+      )}
+    </div>
 
-              {matchedDebts.length === 0 ? (
-                <p className="text-sm text-slate-500">No debt entries found.</p>
-              ) : (
-                <div className="overflow-x-auto max-h-96 overflow-y-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-gray-950/80 text-slate-400 text-xs uppercase tracking-wider sticky top-0">
-                        <th className="p-3 text-left">☐</th>
-                        <th className="p-3 text-left">Name</th>
-                        <th className="p-3 text-left">Total Amount</th>
-                        <th className="p-3 text-left">Transactions</th>
-                        <th className="p-3 text-left">First Date</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {matchedDebts.map(m => (
-                        <tr key={m.name} className={`border-b border-white/5 transition-colors cursor-pointer hover:bg-white/[0.02] ${selectedDebtRows.has(m.name) ? 'bg-amber-500/10' : ''}`} onClick={() => toggleDebtRow(m.name)}>
-                          <td className="p-3"><input type="checkbox" checked={selectedDebtRows.has(m.name)} onChange={() => toggleDebtRow(m.name)} className="w-4 h-4 rounded accent-amber-500" /></td>
-                          <td className="p-3 font-medium text-slate-300">
-                            {m.name}
-                            {m.isExisting && (
-                              <span className="ml-2 text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">Existing</span>
-                            )}
-                            {!m.isExisting && (
-                              <span className="ml-2 text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded">New</span>
-                            )}
-                          </td>
-                          <td className="p-3 font-semibold text-red-400 whitespace-nowrap">{formatCurrency(m.totalAmount)}</td>
-                          <td className="p-3 text-xs text-slate-400">{m.transactionCount} payments</td>
-                          <td className="p-3 text-xs whitespace-nowrap">{formatDate(m.earliestDate) || m.earliestDate}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
+    {matchedDebts.length === 0 ? (
+      <p className="text-sm text-slate-500">No debt entries found.</p>
+    ) : (
+      <div className="overflow-x-auto max-h-96 overflow-y-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-950/80 text-slate-400 text-xs uppercase tracking-wider sticky top-0">
+              <th className="p-3 text-left">☐</th>
+              <th className="p-3 text-left">Date</th>
+              <th className="p-3 text-left">Description</th>
+              <th className="p-3 text-left">Amount</th>
+              <th className="p-3 text-left">Matched To</th>
+              <th className="p-3 text-left">Match</th>
+            </tr>
+          </thead>
+          <tbody>
+            {matchedDebts.flatMap(m => 
+              m.transactions.map((t, idx) => {
+                const isFirst = idx === 0;
+                return (
+                  <tr key={t.id} className={`border-b border-white/5 transition-colors cursor-pointer hover:bg-white/[0.02] ${selectedDebtRows.has(m.name) ? 'bg-amber-500/10' : ''}`} onClick={() => toggleDebtRow(m.name)}>
+                    <td className="p-3">
+                      {isFirst && (
+                        <input type="checkbox" checked={selectedDebtRows.has(m.name)} onChange={() => toggleDebtRow(m.name)} className="w-4 h-4 rounded accent-amber-500" />
+                      )}
+                    </td>
+                    <td className="p-3 text-xs whitespace-nowrap">{formatDate(t.date) || t.date}</td>
+                    <td className="p-3 text-xs max-w-[200px] truncate text-slate-300">{t.description}</td>
+                    <td className="p-3 font-semibold text-red-400 whitespace-nowrap">{formatCurrency(t.amount)}</td>
+                    <td className="p-3 font-medium text-slate-300 whitespace-nowrap">
+                      {m.isExisting ? (
+                        <span>{m.name} <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded ml-1">Existing</span></span>
+                      ) : (
+                        <span>{m.name} <span className="text-[10px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded ml-1">New</span></span>
+                      )}
+                    </td>
+                    <td className="p-3">
+                      <span className={`text-xs px-2 py-1 rounded-full font-semibold ${
+                        m.isExisting ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'
+                      }`}>
+                        {m.isExisting ? '100%' : 'New'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+)}
 
           {/* Action Buttons */}
           <div className="flex gap-3">
